@@ -149,13 +149,20 @@ def generer_numero_commande(supabase) -> str:
 
 @st.cache_data
 def get_logo_base64():
-    """Charge assets/gemstone_logo.png en base64 pour l'intégrer dans la bannière.
-    Retourne None si le fichier est absent (l'app fonctionne quand même)."""
-    try:
-        with open("assets/gemstone_logo.png", "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except FileNotFoundError:
-        return None
+    """Charge le logo GEMSTONE en base64 pour l'intégrer dans la bannière.
+    Cherche successivement plusieurs emplacements possibles.
+    Retourne None si introuvable (l'app fonctionne quand même, avec un titre texte)."""
+    chemins_possibles = [
+        "gemstone_logo.png",
+        "assets/gemstone_logo.png",
+    ]
+    for chemin in chemins_possibles:
+        try:
+            with open(chemin, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        except FileNotFoundError:
+            continue
+    return None
 
 
 # ============================================================
