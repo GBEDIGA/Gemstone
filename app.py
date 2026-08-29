@@ -6,11 +6,21 @@ Rôles gérés dans ce même fichier :
 - secretaire : saisie des commandes reçues via WhatsApp
 - machiniste  : téléchargement du fichier + bascule automatique du statut
 - caissiere   : suivi du statut + clôture livraison/paiement
-- dg          : tableau de bord global temps réel
+- dg          : tableau de bord global + gestion des profils employés
 
 Prérequis Supabase : tables 'profils', 'clients', 'commandes'
                       + bucket Storage 'commandes-fichiers'
                       (voir supabase_schema.sql pour la création complète).
+
+Secrets requis (.streamlit/secrets.toml ou Streamlit Cloud > Settings > Secrets) :
+- SUPABASE_URL         : URL du projet Supabase
+- SUPABASE_KEY         : clé publishable (sb_publishable_...) — utilisée pour toutes
+                          les opérations normales, protégée par les policies RLS.
+- SUPABASE_SERVICE_KEY : clé secrète (sb_secret_...) — utilisée UNIQUEMENT côté
+                          serveur pour la création/suppression de comptes employés
+                          par le DG. Ne jamais l'exposer côté client : ici c'est sûr
+                          car Streamlit exécute tout le code côté serveur, jamais
+                          dans le navigateur.
 """
 
 from datetime import datetime
@@ -39,6 +49,25 @@ STATUT_LABELS = {
     STATUT_LIVREE: "✅ Livrée et payée",
 }
 
+SUPPORTS_IMPRESSION = [
+    "Bâche mate",
+    "Bâche brillante",
+    "Opaque",
+    "Transparent",
+    "PVC",
+    "One Way",
+    "Réfléchissant",
+    "DTF",
+]
+
+ROLES_GERES_PAR_DG = ["secretaire", "machiniste", "caissiere"]
+ROLE_LABELS = {
+    "secretaire": "Secrétaire",
+    "machiniste": "Machiniste",
+    "caissiere": "Caissière",
+    "dg": "Directeur Général",
+}
+
 
 # ============================================================
 # CONNEXION SUPABASE
@@ -46,10 +75,18 @@ STATUT_LABELS = {
 
 @st.cache_resource
 def get_supabase_client() -> Client:
-    # .strip() + suppression des retours à la ligne : évite les erreurs "Invalid API key"
-    # causées par un espace ou un saut de ligne accidentellement collé dans les Secrets.
+    """Client 'normal', utilisé pour toutes les opérations soumises aux policies RLS."""
     url = st.secrets["SUPABASE_URL"].strip()
     key = st.secrets["SUPABASE_KEY"].strip().replace("\n", "").replace(" ", "")
+    return create_client(url, key)
+
+
+@st.cache_resource
+def get_supabase_admin_client() -> Client:
+    """Client 'admin', utilisé UNIQUEMENT pour créer/supprimer des comptes utilisateurs.
+    Reste côté serveur en permanence (jamais transmis au navigateur)."""
+    url = st.secrets["SUPABASE_URL"].strip()
+    key = st.secrets["SUPABASE_SERVICE_KEY"].strip().replace("\n", "").replace(" ", "")
     return create_client(url, key)
 
 
@@ -114,7 +151,60 @@ def generer_numero_commande(supabase) -> str:
 # ============================================================
 
 def afficher_login():
-    st.title("💎 GEMSTONE — Gestion des commandes")
+    st.markdown(
+        """
+        <style>
+        .gemstone-hero {
+            background: linear-gradient(135deg, #0f2027 0%, #203a43 45%, #2c5364 100%);
+            border-radius: 18px;
+            padding: 48px 32px;
+            text-align: center;
+            margin-bottom: 28px;
+            color: #ffffff;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+        .gemstone-hero h1 {
+            font-size: 2.6rem;
+            margin-bottom: 6px;
+            letter-spacing: 1px;
+        }
+        .gemstone-hero p {
+            font-size: 1.1rem;
+            opacity: 0.92;
+            max-width: 560px;
+            margin: 0 auto;
+        }
+        .gemstone-values {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 28px;
+            flex-wrap: wrap;
+        }
+        .gemstone-value {
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+        </style>
+        <div class="gemstone-hero">
+            <h1>💎 GEMSTONE</h1>
+            <p>Chaque commande façonnée avec précision, chaque client servi avec fierté.
+            La qualité de notre travail est la meilleure publicité de l'atelier.</p>
+            <div class="gemstone-values">
+                <div class="gemstone-value">🎯 Précision</div>
+                <div class="gemstone-value">⚡ Réactivité</div>
+                <div class="gemstone-value">🤝 Confiance</div>
+                <div class="gemstone-value">✨ Excellence</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.subheader("Connexion")
 
     with st.form("login_form"):
@@ -132,10 +222,7 @@ def afficher_login():
                 else:
                     st.error(message)
 
-    st.caption(
-        "Les comptes (Secrétaires, Machinistes, Caissière, DG) sont créés "
-        "par le Directeur Général dans Supabase."
-    )
+    st.caption("Ensemble, nous imprimons l'excellence — une commande à la fois. 💎")
 
 
 # ============================================================
@@ -168,14 +255,11 @@ def afficher_espace_secretaire(supabase):
                 with col1:
                     client_nom = st.text_input("Nom du client *")
                     client_contact = st.text_input("Contact WhatsApp *")
-                    support = st.selectbox(
-                        "Support d'impression *",
-                        ["Bâche", "Vinyle", "Papier photo", "Autocollant", "Autre"],
-                    )
+                    support = st.selectbox("Support d'impression *", SUPPORTS_IMPRESSION)
                 with col2:
                     nb_exemplaires = st.number_input("Nombre d'exemplaires *", min_value=1, value=1)
-                    hauteur = st.number_input("Hauteur (cm) *", min_value=0.0, step=0.1)
-                    largeur = st.number_input("Largeur (cm) *", min_value=0.0, step=0.1)
+                    hauteur = st.number_input("Hauteur (ml) *", min_value=0.0, step=0.01, format="%.2f")
+                    largeur = st.number_input("Largeur (ml) *", min_value=0.0, step=0.01, format="%.2f")
 
                 machiniste_choisi = st.selectbox(
                     "Assigner à un machiniste *",
@@ -184,7 +268,7 @@ def afficher_espace_secretaire(supabase):
                 )
 
                 fichier = st.file_uploader(
-                    "Fichier client (PDF, image...)", type=["pdf", "png", "jpg", "jpeg"]
+                    "Fichier client (tous formats acceptés : PDF, JPG, PNG, TIFF, AI, PSD, EPS, CDR...)"
                 )
 
                 submitted = st.form_submit_button("✅ Valider la commande")
@@ -214,7 +298,7 @@ def afficher_espace_secretaire(supabase):
 
                             fichier_path = None
                             if fichier is not None:
-                                extension = fichier.name.split(".")[-1]
+                                extension = fichier.name.split(".")[-1] if "." in fichier.name else "bin"
                                 fichier_path = f"{numero_commande}.{extension}"
                                 supabase.storage.from_("commandes-fichiers").upload(
                                     fichier_path, fichier.getvalue()
@@ -307,7 +391,7 @@ def afficher_espace_machiniste(supabase):
                     f"**Support :** {cmd['support_impression']} — "
                     f"**Exemplaires :** {cmd['nombre_exemplaires']}"
                 )
-                st.write(f"**Dimensions :** {cmd['hauteur']} x {cmd['largeur']} cm")
+                st.write(f"**Dimensions :** {cmd['hauteur']} x {cmd['largeur']} ml")
                 st.write(f"**Statut actuel :** {STATUT_LABELS.get(cmd['statut'], cmd['statut'])}")
 
             with col2:
@@ -437,13 +521,11 @@ def afficher_espace_caissiere(supabase):
 
 
 # ============================================================
-# ESPACE DG
+# ESPACE DG — TABLEAU DE BORD
 # ============================================================
 
-def afficher_espace_dg(supabase):
-    st.title("📊 Tableau de bord — Direction Générale")
-
-    if st.button("🔄 Actualiser", key="refresh_dg"):
+def afficher_dashboard_dg(supabase):
+    if st.button("🔄 Actualiser", key="refresh_dg_dashboard"):
         st.rerun()
 
     commandes_res = (
@@ -513,6 +595,137 @@ def afficher_espace_dg(supabase):
 
 
 # ============================================================
+# ESPACE DG — GESTION DES EMPLOYÉS
+# ============================================================
+
+def _creer_employe(supabase, supabase_admin, nom, email, password, role):
+    try:
+        result = supabase_admin.auth.admin.create_user(
+            {"email": email, "password": password, "email_confirm": True}
+        )
+        supabase.table("profils").insert(
+            {
+                "id": result.user.id,
+                "nom": nom,
+                "email": email,
+                "role": role,
+                "actif": True,
+            }
+        ).execute()
+        st.success(f"Profil de **{nom}** ({ROLE_LABELS[role]}) créé avec succès.")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Erreur lors de la création : {e}")
+
+
+def afficher_gestion_employes(supabase, supabase_admin):
+    st.subheader("➕ Créer un nouvel employé")
+
+    with st.form("nouvel_employe", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            nom = st.text_input("Nom complet *")
+            email = st.text_input("Email de connexion *")
+        with col2:
+            role = st.selectbox(
+                "Rôle *",
+                ROLES_GERES_PAR_DG,
+                format_func=lambda r: ROLE_LABELS[r],
+            )
+            password = st.text_input("Mot de passe temporaire *", type="password")
+
+        submitted = st.form_submit_button("✅ Créer le profil")
+
+        if submitted:
+            if not nom or not email or not password:
+                st.error("Tous les champs sont obligatoires.")
+            elif len(password) < 6:
+                st.error("Le mot de passe doit contenir au moins 6 caractères.")
+            elif role == "caissiere":
+                caissiere_existante = (
+                    supabase.table("profils")
+                    .select("id, nom")
+                    .eq("role", "caissiere")
+                    .eq("actif", True)
+                    .execute()
+                )
+                if caissiere_existante.data:
+                    nom_actuelle = caissiere_existante.data[0]["nom"]
+                    st.error(
+                        f"Un profil Caissière actif existe déjà ({nom_actuelle}). "
+                        f"Supprimez-le ou désactivez-le ci-dessous avant d'en créer un nouveau."
+                    )
+                else:
+                    _creer_employe(supabase, supabase_admin, nom, email, password, role)
+            else:
+                _creer_employe(supabase, supabase_admin, nom, email, password, role)
+
+    st.divider()
+    st.subheader("📋 Employés existants")
+
+    employes_res = (
+        supabase.table("profils")
+        .select("id, nom, email, role, actif")
+        .in_("role", ROLES_GERES_PAR_DG)
+        .order("role")
+        .order("nom")
+        .execute()
+    )
+    employes = employes_res.data or []
+
+    if not employes:
+        st.info("Aucun employé créé pour le moment.")
+        return
+
+    for emp in employes:
+        with st.container(border=True):
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+            with col1:
+                statut_icone = "🟢" if emp["actif"] else "⚪"
+                st.write(f"{statut_icone} **{emp['nom']}**")
+                st.caption(emp.get("email") or "—")
+            with col2:
+                st.write(ROLE_LABELS.get(emp["role"], emp["role"]))
+            with col3:
+                label = "Désactiver" if emp["actif"] else "Réactiver"
+                if st.button(label, key=f"toggle_{emp['id']}"):
+                    supabase.table("profils").update({"actif": not emp["actif"]}).eq(
+                        "id", emp["id"]
+                    ).execute()
+                    st.rerun()
+            with col4:
+                if st.button("🗑️ Supprimer", key=f"del_{emp['id']}"):
+                    try:
+                        # La suppression du compte auth entraîne la suppression du profil
+                        # (ON DELETE CASCADE). Si l'employé a des commandes à son nom,
+                        # la base refuse la suppression pour préserver l'historique —
+                        # dans ce cas, on désactive le compte à la place.
+                        supabase_admin.auth.admin.delete_user(emp["id"])
+                        st.success(f"{emp['nom']} supprimé définitivement.")
+                    except Exception:
+                        supabase.table("profils").update({"actif": False}).eq(
+                            "id", emp["id"]
+                        ).execute()
+                        st.warning(
+                            f"{emp['nom']} a des commandes associées : le compte a été "
+                            f"désactivé au lieu d'être supprimé, pour préserver l'historique."
+                        )
+                    st.rerun()
+
+
+def afficher_espace_dg(supabase, supabase_admin):
+    st.title("📊 Espace Direction Générale")
+
+    tab_dashboard, tab_employes = st.tabs(["📊 Tableau de bord", "👥 Gestion des employés"])
+
+    with tab_dashboard:
+        afficher_dashboard_dg(supabase)
+
+    with tab_employes:
+        afficher_gestion_employes(supabase, supabase_admin)
+
+
+# ============================================================
 # ROUTAGE PRINCIPAL
 # ============================================================
 
@@ -538,7 +751,8 @@ def main():
     elif role == "caissiere":
         afficher_espace_caissiere(supabase)
     elif role == "dg":
-        afficher_espace_dg(supabase)
+        supabase_admin = get_supabase_admin_client()
+        afficher_espace_dg(supabase, supabase_admin)
     else:
         st.error("Rôle non reconnu. Contactez le Directeur Général.")
 
