@@ -23,6 +23,7 @@ Secrets requis (.streamlit/secrets.toml ou Streamlit Cloud > Settings > Secrets)
                           dans le navigateur.
 """
 
+import base64
 from datetime import datetime
 
 import pandas as pd
@@ -146,52 +147,75 @@ def generer_numero_commande(supabase) -> str:
     return f"CMD-{annee}-{count:06d}"
 
 
+@st.cache_data
+def get_logo_base64():
+    """Charge assets/gemstone_logo.png en base64 pour l'intégrer dans la bannière.
+    Retourne None si le fichier est absent (l'app fonctionne quand même)."""
+    try:
+        with open("assets/gemstone_logo.png", "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except FileNotFoundError:
+        return None
+
+
 # ============================================================
 # ÉCRAN DE CONNEXION
 # ============================================================
 
 def afficher_login():
+    logo_b64 = get_logo_base64()
+    if logo_b64:
+        logo_html = f'<img src="data:image/png;base64,{logo_b64}" class="gemstone-logo" alt="GEMSTONE" />'
+    else:
+        logo_html = "<h1>💎 GEMSTONE</h1>"
+
     st.markdown(
-        """
+        f"""
         <style>
-        .gemstone-hero {
+        .gemstone-hero {{
             background: linear-gradient(135deg, #0f2027 0%, #203a43 45%, #2c5364 100%);
             border-radius: 18px;
-            padding: 48px 32px;
+            padding: 40px 32px;
             text-align: center;
             margin-bottom: 28px;
             color: #ffffff;
             box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-        }
-        .gemstone-hero h1 {
+        }}
+        .gemstone-logo {{
+            max-width: 320px;
+            width: 80%;
+            height: auto;
+            margin-bottom: 12px;
+        }}
+        .gemstone-hero h1 {{
             font-size: 2.6rem;
             margin-bottom: 6px;
             letter-spacing: 1px;
-        }
-        .gemstone-hero p {
+        }}
+        .gemstone-hero p {{
             font-size: 1.1rem;
             opacity: 0.92;
             max-width: 560px;
-            margin: 0 auto;
-        }
-        .gemstone-values {
+            margin: 8px auto 0 auto;
+        }}
+        .gemstone-values {{
             display: flex;
             justify-content: center;
             gap: 20px;
             margin-top: 28px;
             flex-wrap: wrap;
-        }
-        .gemstone-value {
+        }}
+        .gemstone-value {{
             background: rgba(255,255,255,0.10);
             border: 1px solid rgba(255,255,255,0.18);
             border-radius: 10px;
             padding: 10px 20px;
             font-size: 0.95rem;
             font-weight: 500;
-        }
+        }}
         </style>
         <div class="gemstone-hero">
-            <h1>💎 GEMSTONE</h1>
+            {logo_html}
             <p>Chaque commande façonnée avec précision, chaque client servi avec fierté.
             La qualité de notre travail est la meilleure publicité de l'atelier.</p>
             <div class="gemstone-values">
