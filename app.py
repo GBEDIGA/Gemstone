@@ -46,8 +46,10 @@ STATUT_LABELS = {
 
 @st.cache_resource
 def get_supabase_client() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    # .strip() + suppression des retours à la ligne : évite les erreurs "Invalid API key"
+    # causées par un espace ou un saut de ligne accidentellement collé dans les Secrets.
+    url = st.secrets["SUPABASE_URL"].strip()
+    key = st.secrets["SUPABASE_KEY"].strip().replace("\n", "").replace(" ", "")
     return create_client(url, key)
 
 
