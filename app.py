@@ -395,7 +395,7 @@ def afficher_espace_secretaire(supabase):
             supabase.table("commandes")
             .select(
                 "numero_commande, date_heure_saisie, statut, support_impression, "
-                "nombre_exemplaires, clients(nom)"
+                "nombre_exemplaires, clients(nom, contact_whatsapp)"
             )
             .eq("secretaire_id", st.session_state["user_id"])
             .order("date_heure_saisie", desc=True)
@@ -404,8 +404,9 @@ def afficher_espace_secretaire(supabase):
 
         if mes_commandes.data:
             for cmd in mes_commandes.data:
+                contact = cmd["clients"]["contact_whatsapp"] if cmd.get("clients") else "—"
                 st.write(
-                    f"**{cmd['numero_commande']}** — "
+                    f"**{cmd['numero_commande']}** — 📞 {contact} — "
                     f"{STATUT_LABELS.get(cmd['statut'], cmd['statut'])}"
                 )
         else:
