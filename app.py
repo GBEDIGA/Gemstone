@@ -24,11 +24,13 @@ Secrets requis (.streamlit/secrets.toml ou Streamlit Cloud > Settings > Secrets)
 """
 
 import base64
+import re
+import unicodedata
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 
 # ============================================================
 # CONFIGURATION GÉNÉRALE
@@ -85,10 +87,17 @@ def get_supabase_client() -> Client:
 @st.cache_resource
 def get_supabase_admin_client() -> Client:
     """Client 'admin', utilisé UNIQUEMENT pour créer/supprimer des comptes utilisateurs.
-    Reste côté serveur en permanence (jamais transmis au navigateur)."""
+    Reste côté serveur en permanence (jamais transmis au navigateur).
+    auto_refresh_token=False et persist_session=False : sans ça, le client essaie de
+    gérer une session utilisateur classique, ce qui peut casser l'en-tête
+    d'autorisation envoyé aux fonctions d'administration (auth.admin.*)."""
     url = st.secrets["SUPABASE_URL"].strip()
     key = st.secrets["SUPABASE_SERVICE_KEY"].strip().replace("\n", "").replace(" ", "")
-    return create_client(url, key)
+    return create_client(
+        url,
+        key,
+        options=ClientOptions(auto_refresh_token=False, persist_session=False),
+    )
 
 
 # ============================================================
@@ -140,11 +149,31 @@ def is_logged_in() -> bool:
     return st.session_state.get("logged_in", False)
 
 
-def generer_numero_commande(supabase) -> str:
+def _slugify(texte: str, max_len: int = 25) -> str:
+    """Nettoie un texte pour un usage dans un identifiant/nom de fichier :
+    retire les accents, remplace tout caractère non alphanumérique par '-',
+    tronque à max_len caractères."""
+    if not texte:
+        return "x"
+    texte = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode("ascii")
+    texte = re.sub(r"[^a-zA-Z0-9]+", "-", texte).strip("-")
+    return (texte[:max_len].strip("-") or "x")
+
+
+def generer_numero_commande(supabase, client_nom, support, hauteur, largeur, nb_exemplaires) -> str:
+    """Génère un identifiant unique et lisible, ex :
+    CMD-2026-000123_Jean-Dupont-Bache-Mate-2.00x1.50ml-x10
+    Le compteur (000123) garantit l'unicité même si deux commandes ont
+    exactement le même client/support/dimensions/quantité."""
     annee = datetime.now().year
     count_res = supabase.table("commandes").select("id", count="exact").execute()
     count = (count_res.count or 0) + 1
-    return f"CMD-{annee}-{count:06d}"
+
+    client_slug = _slugify(client_nom)
+    support_slug = _slugify(support)
+    dimensions = f"{hauteur:.2f}x{largeur:.2f}ml"
+
+    return f"CMD-{annee}-{count:06d}_{client_slug}-{support_slug}-{dimensions}-x{nb_exemplaires}"
 
 
 @st.cache_data
@@ -325,7 +354,9 @@ def afficher_espace_secretaire(supabase):
                                 )
                                 client_id = new_client.data[0]["id"]
 
-                            numero_commande = generer_numero_commande(supabase)
+                            numero_commande = generer_numero_commande(
+                                supabase, client_nom, support, hauteur, largeur, int(nb_exemplaires)
+                            )
 
                             fichier_path = None
                             if fichier is not None:
