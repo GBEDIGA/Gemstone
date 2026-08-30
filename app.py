@@ -599,8 +599,15 @@ def afficher_dashboard_dg(supabase):
     df = pd.DataFrame(commandes)
 
     if not df.empty:
-        df["date_heure_saisie"] = pd.to_datetime(df["date_heure_saisie"], errors="coerce")
-        df["date_livraison"] = pd.to_datetime(df["date_livraison"], errors="coerce")
+        # utc=True + tz_localize(None) : uniformise toutes les dates en UTC sans fuseau,
+        # sinon les comparaisons avec pd.Timestamp.now() (naïf) plantent avec un TypeError
+        # car Supabase renvoie des dates avec fuseau horaire (+00:00).
+        df["date_heure_saisie"] = (
+            pd.to_datetime(df["date_heure_saisie"], errors="coerce", utc=True).dt.tz_localize(None)
+        )
+        df["date_livraison"] = (
+            pd.to_datetime(df["date_livraison"], errors="coerce", utc=True).dt.tz_localize(None)
+        )
 
     df_livrees = df[df["statut"] == STATUT_LIVREE].copy() if not df.empty else df
 
