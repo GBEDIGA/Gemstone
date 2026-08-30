@@ -598,6 +598,15 @@ def afficher_dashboard_dg(supabase):
     commandes = commandes_res.data or []
     df = pd.DataFrame(commandes)
 
+    if not df.empty:
+        df["date_heure_saisie"] = pd.to_datetime(df["date_heure_saisie"], errors="coerce")
+        df["date_livraison"] = pd.to_datetime(df["date_livraison"], errors="coerce")
+
+    df_livrees = df[df["statut"] == STATUT_LIVREE].copy() if not df.empty else df
+
+    # ------------------------------------------------------------
+    # Indicateurs globaux (depuis le début)
+    # ------------------------------------------------------------
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Commandes totales", len(df))
@@ -605,19 +614,92 @@ def afficher_dashboard_dg(supabase):
         en_cours = len(df[df["statut"] != STATUT_LIVREE]) if not df.empty else 0
         st.metric("En cours de traitement", en_cours)
     with col3:
-        ca_total = df[df["statut"] == STATUT_LIVREE]["montant_total"].sum() if not df.empty else 0
+        ca_total = df_livrees["montant_total"].sum() if not df_livrees.empty else 0
         st.metric("Chiffre d'affaires total", f"{ca_total:,.0f} FCFA")
     with col4:
-        livrees = len(df[df["statut"] == STATUT_LIVREE]) if not df.empty else 0
-        st.metric("Commandes livrées", livrees)
+        st.metric("Commandes livrées", len(df_livrees))
+
+    st.divider()
+
+    # ------------------------------------------------------------
+    # Aujourd'hui vs Ce mois-ci
+    # ------------------------------------------------------------
+    st.subheader("📅 Performance journalière & mensuelle")
+
+    aujourdhui = pd.Timestamp.now().normalize()
+    debut_mois = aujourdhui.replace(day=1)
+    debut_annee = aujourdhui.replace(month=1, day=1)
+
+    if not df_livrees.empty:
+        est_aujourdhui = df_livrees["date_livraison"].dt.normalize() == aujourdhui
+        est_ce_mois = df_livrees["date_livraison"] >= debut_mois
+        est_cette_annee = df_livrees["date_livraison"] >= debut_annee
+        ca_jour = df_livrees.loc[est_aujourdhui, "montant_total"].sum()
+        nb_jour = int(est_aujourdhui.sum())
+        ca_mois = df_livrees.loc[est_ce_mois, "montant_total"].sum()
+        nb_mois = int(est_ce_mois.sum())
+        ca_annee = df_livrees.loc[est_cette_annee, "montant_total"].sum()
+        nb_annee = int(est_cette_annee.sum())
+    else:
+        ca_jour = nb_jour = ca_mois = nb_mois = ca_annee = nb_annee = 0
+
+    col_j, col_m, col_an = st.columns(3)
+    with col_j:
+        st.markdown("**Aujourd'hui**")
+        st.metric("Chiffre d'affaires", f"{ca_jour:,.0f} FCFA")
+        st.metric("Commandes livrées", nb_jour)
+    with col_m:
+        st.markdown(f"**Ce mois-ci ({debut_mois.strftime('%B %Y')})**")
+        st.metric("Chiffre d'affaires", f"{ca_mois:,.0f} FCFA")
+        st.metric("Commandes livrées", nb_mois)
+    with col_an:
+        st.markdown(f"**Cette année ({debut_annee.strftime('%Y')})**")
+        st.metric("Chiffre d'affaires", f"{ca_annee:,.0f} FCFA")
+        st.metric("Commandes livrées", nb_annee)
+
+    st.divider()
+
+    # ------------------------------------------------------------
+    # Courbes d'évolution
+    # ------------------------------------------------------------
+    st.subheader("📈 Évolution du chiffre d'affaires")
+
+    if not df_livrees.empty:
+        tab_jour, tab_mois, tab_annee = st.tabs(
+            ["Par jour (30 derniers jours)", "Par mois", "Par année"]
+        )
+
+        with tab_jour:
+            debut_periode = aujourdhui - pd.Timedelta(days=29)
+            df_periode = df_livrees[df_livrees["date_livraison"] >= debut_periode].copy()
+            df_periode["jour"] = df_periode["date_livraison"].dt.date
+            ca_par_jour = df_periode.groupby("jour")["montant_total"].sum()
+            # Complète les jours sans vente à 0, pour une courbe continue sans trous
+            toutes_les_dates = pd.date_range(debut_periode, aujourdhui, freq="D").date
+            ca_par_jour = ca_par_jour.reindex(toutes_les_dates, fill_value=0)
+            st.line_chart(ca_par_jour)
+
+        with tab_mois:
+            df_mensuel = df_livrees.copy()
+            df_mensuel["mois"] = df_mensuel["date_livraison"].dt.to_period("M").astype(str)
+            ca_par_mois = df_mensuel.groupby("mois")["montant_total"].sum()
+            st.line_chart(ca_par_mois)
+
+        with tab_annee:
+            df_annuel = df_livrees.copy()
+            df_annuel["annee"] = df_annuel["date_livraison"].dt.year
+            ca_par_annee = df_annuel.groupby("annee")["montant_total"].sum()
+            st.bar_chart(ca_par_annee)
+    else:
+        st.info("Pas encore de commande livrée — la courbe apparaîtra dès la première vente.")
 
     st.divider()
     col_a, col_b = st.columns(2)
 
     with col_a:
         st.subheader("💳 Répartition des paiements")
-        if not df.empty and (df["statut"] == STATUT_LIVREE).any():
-            paiements = df[df["statut"] == STATUT_LIVREE].groupby("mode_paiement")["montant_total"].sum()
+        if not df_livrees.empty:
+            paiements = df_livrees.groupby("mode_paiement")["montant_total"].sum()
             st.bar_chart(paiements)
         else:
             st.info("Aucun paiement enregistré pour le moment.")
