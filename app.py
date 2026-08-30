@@ -404,10 +404,8 @@ def afficher_espace_secretaire(supabase):
 
         if mes_commandes.data:
             for cmd in mes_commandes.data:
-                client_nom = cmd["clients"]["nom"] if cmd.get("clients") else "—"
                 st.write(
-                    f"**{cmd['numero_commande']}** — {client_nom} — "
-                    f"{cmd['support_impression']} x{cmd['nombre_exemplaires']} — "
+                    f"**{cmd['numero_commande']}** — "
                     f"{STATUT_LABELS.get(cmd['statut'], cmd['statut'])}"
                 )
         else:
@@ -444,11 +442,10 @@ def afficher_espace_machiniste(supabase):
         return
 
     for cmd in commandes:
-        client_nom = cmd["clients"]["nom"] if cmd.get("clients") else "—"
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.markdown(f"### {cmd['numero_commande']} — {client_nom}")
+                st.markdown(f"### {cmd['numero_commande']}")
                 st.write(
                     f"**Support :** {cmd['support_impression']} — "
                     f"**Exemplaires :** {cmd['nombre_exemplaires']}"
@@ -522,7 +519,7 @@ def afficher_espace_caissiere(supabase):
                 client = cmd.get("clients") or {}
                 machiniste = cmd.get("profils") or {}
                 with st.container(border=True):
-                    st.markdown(f"### {cmd['numero_commande']} — {client.get('nom', '—')}")
+                    st.markdown(f"### {cmd['numero_commande']}")
                     st.write(f"📞 {client.get('contact_whatsapp', '—')}")
                     st.write(f"**Machiniste assigné :** {machiniste.get('nom', '—')}")
                     st.write(f"**Statut :** {STATUT_LABELS.get(cmd['statut'], cmd['statut'])}")
@@ -572,10 +569,9 @@ def afficher_espace_caissiere(supabase):
 
         if historique:
             for h in historique:
-                client_nom = h["clients"]["nom"] if h.get("clients") else "—"
                 mode = "MoMo" if h["mode_paiement"] == "momo" else "Espèces"
                 st.write(
-                    f"**{h['numero_commande']}** — {client_nom} — "
+                    f"**{h['numero_commande']}** — "
                     f"{h['montant_total']} FCFA ({mode}) — {h['date_livraison']}"
                 )
         else:
